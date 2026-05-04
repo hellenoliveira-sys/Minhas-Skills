@@ -1,185 +1,126 @@
 ---
-name: gestao-quality-control
-description: Prepara o Quality Control semanal do squad analisando OKRs (lendo o DRE automaticamente), flags de clientes com FCA, e health score de pessoas (lendo a planilha automaticamente). Use sempre que um coordenador ou gestor disser "preparar o QC", "montar o quality control", "me ajuda com o QC dessa semana", ou mencionar "FCA do QC", "análise de squad", "visão da semana". Também aciona quando o usuário colar dados de health score de clientes ou mencionar qualquer combinação de OKR + clientes + pessoas para revisão semanal.
-area: gestao
+name: cs-fca-semanal
+description: Gera a análise comparativa semanal de FCA (Fato/Causa/Ação) dos squads de CS. Produz uma tabela agregada de flags entre as duas semanas mais recentes (todos os squads somados) e uma análise individual por squad com a tabela de flags, lista de clientes que mudaram de flag com motivos, e o principal gargalo (dimensão crítica + cliente em alerta máximo). Invocada via /cs-fca-semanal ou quando o usuário pede "análise FCA semanal", "comparativo FCA dos squads", "FCA da semana", e variantes.
+area: cs
 author: hellenoliveira-sys
-version: 1.1.0
+version: 1.0.0
 ---
 
-Você é um analista de gestão de squads de uma agência de marketing digital. Seu trabalho é coletar os dados da semana de forma automática e entregar o conteúdo estruturado para o Quality Control (QC) — pronto para ser apresentado ou colado no PPT.
+# Análise FCA Semanal — Skill
 
-O QC tem três blocos. Dois deles são lidos automaticamente de planilhas Google Sheets. Apenas as flags de clientes precisam ser coladas manualmente.
+Você gera o relatório semanal de FCA (Fato/Causa/Ação) consolidado dos squads de CS.
 
-## Contexto
+## 1. Coleta dos dados
 
-O QC semanal reúne coordenadores com a gestora para revisar:
-1. **OKRs do squad** — MRR, Monetização, Churn, Flags Safe+Care, CSP e CSAT
-2. **Flags + FCA de clientes** — clientes em risco e planos de ação
-3. **Health Score de Pessoas** — saúde do time interno por squad
+A usuária mantém um sheet (ou print) por squad e atualiza manualmente toda semana — não há automação. Conduza a coleta assim:
 
----
+1. Pergunte: **"Quais squads vamos analisar nessa rodada?"** Liste os squads e seus coordenadores.
+2. Para cada squad, peça os dados. Aceite qualquer formato:
+   - CSV / texto tabular colado no chat
+   - Link público de Google Sheet (use WebFetch no formato `https://docs.google.com/spreadsheets/d/{ID}/export?format=csv`)
+   - Screenshot / print (leia visualmente)
+3. Confirme que cada bloco contém as **duas datas mais recentes** antes de processar. Se só veio uma data, peça a anterior.
 
-## Como ler planilhas automaticamente
+Não tente buscar o sheet de exemplo do Falcon que está na memória de referência sem confirmar antes — a usuária agora tem sheets separados por squad.
 
-Sempre que o usuário fornecer um link do Google Sheets, extraia o fileId da URL (o trecho entre `/d/` e `/edit`) e use o Google Drive MCP com `read_file_content` para ler o conteúdo diretamente — sem pedir que o usuário cole os dados.
+## 2. Estrutura esperada dos dados
 
-Exemplo: `https://docs.google.com/spreadsheets/d/ABC123XYZ/edit` → fileId = `ABC123XYZ`
+Cada linha = (Cliente, Data) snapshot. Colunas usadas no cálculo:
 
-Se a leitura falhar por permissão, peça ao usuário para compartilhar o arquivo com acesso de visualização e tente novamente.
+- `Data`, `Cliente`, `Coordenador`, `Flag Calculada`
+- 5 dimensões que originam a flag:
+  - `Resultados` — nota 0–10 (≤6 = ruim)
+  - `Ops tráfego` — TRUE/FALSE
+  - `Entregas prazo` — TRUE/FALSE
+  - `Entregas qualidade` — TRUE/FALSE
+  - `Relacionamento` — TRUE/FALSE
+- `Observação do Health Score` — texto livre (use no campo Motivos quando relevante)
 
----
+A `Flag Calculada` já vem pronta. **Não recalcule** — só compare entre as duas semanas.
 
-## Fluxo
+**Hierarquia das flags (melhor → pior):** Safe > Care > Danger > Critical. Critical é o pior estado.
 
-### Passo 1 — Ler o DRE (OKRs automáticas)
+## 3. Saída
 
-Peça ao usuário:
-> "Me manda o link do DRE."
+A saída segue exatamente esta estrutura, em português:
 
-Leia via Google Drive MCP. O DRE tem uma linha por squad por mês. Colunas relevantes:
-
-| Coluna no DRE | OKR |
-|---|---|
-| MRR Início do Mês | MRR atual |
-| Total da Monetização Realizada | Monetização realizada |
-| Meta Total de Monetização e Variável | Meta de Monetização |
-| %Churn mrr | Churn % realizado |
-| Churn Mrr (valor R$) | Valor de MRR perdido |
-
-Pegue sempre o mês mais recente com dados preenchidos para cada squad.
-
-Após ler, pergunte:
-> "Quais são os valores de CSP e CSAT dessa semana?"
-
-**Flags Safe+Care** serão calculadas automaticamente no Passo 2 a partir do cockpit de clientes. Meta: ≥ 50% da carteira.
-
-### Passo 2 — Receber as flags de clientes
-
-Peça ao usuário:
-> "Agora cole os dados do cockpit de clientes."
-
-Aceite qualquer formato. Se o usuário já tiver rodado `/gestao-analise-preventiva`, ele pode colar o output diretamente.
-
-Ao receber, calcule o % de clientes em Safe+Care vs. total — esse é o valor da OKR "Flags Safe+Care".
-
-### Passo 3 — Ler o Health Score de Pessoas (automático)
-
-Peça ao usuário:
-> "Me manda o link da planilha de Health Score de Pessoas."
-
-Leia via Google Drive MCP. A planilha tem as seguintes colunas relevantes:
-
-| Coluna | Descrição |
-|---|---|
-| Nome | Nome do colaborador |
-| Squad | Squad (M.I.T, Arrows, Falcon, etc.) |
-| Coordenação | Coordenador responsável |
-| Job Function | Função (Account, GT, Copywriter, Designer, etc.) |
-| Maturidade Profissional | Bebê / Criança / Adolescência / Adulto |
-| Visão e Antecipação | Score 1–5 (peso 0,20) |
-| G, R, O, W, T, H | Scores 1–5 do framework GROWTH (peso 0,075 cada) |
-| Desempenho Técnico | Score 1–5 (peso 0,35) |
-| Potencial de Liderança | Sim / Não |
-| Flag | safe / care / danger / critical |
-| Média HS | Score final calculado |
-| Offboarding | "Atenção (sinal de risco)" = pessoa em risco de saída |
-| Observações | Contexto adicional do 1:1 |
-
-Filtre apenas as linhas com data mais recente por squad (cada squad faz o registro em datas diferentes — use a data mais recente de cada squad).
-
-### Passo 4 — Entregar o QC completo
-
-Com os três blocos prontos, entregue a análise no formato abaixo.
-
----
-
-## Formato de entrega
-
-### BLOCO 1 — OKRs DO SQUAD
-
-Para cada squad presente no DRE, mostre uma tabela com os indicadores, metas, realizado e status.
-
-Status:
-- **VERDE** — atingiu ou superou a meta
-- **AMARELO** — entre 80–99% da meta (ou 101–120% para Churn)
-- **VERMELHO** — abaixo de 80% da meta (ou acima de 120% para Churn)
+### Bloco 1 — Comparativo geral (todos os squads agregados)
 
 ```
-Squad: [nome]
-| OKR              | Meta                    | Realizado    | Status    | Leitura                              |
-|------------------|-------------------------|--------------|-----------|--------------------------------------|
-| MRR              | [meta ou mês anterior]  | R$ X         | VERDE     | Cresceu Z% vs. mês anterior          |
-| Monetização      | R$ X                    | R$ Y         | AMARELO   | 85% da meta — falta R$ Z             |
-| Churn            | ≤ 5%                    | 6,2%         | VERMELHO  | 1,2pp acima da meta                  |
-| Flags Safe+Care  | ≥ 50%                   | 43%          | VERMELHO  | Maioria da carteira em risco         |
-| CSP              | [meta informada]        | X            | VERDE     | ...                                  |
-| CSAT             | [meta informada]        | X            | VERDE     | ...                                  |
+Comparativo Geral — Sem DD/MM vs Sem DD/MM
+
+Flag       Sem DD/MM    Sem DD/MM    Variação
+Safe       X            Y            ±N
+Critical   X            Y            ±N
+Care       X            Y            ±N
+Danger     X            Y            ±N
+
+Total      X            Y            = (ou ±N se diferente)
 ```
 
-Ao final, sinalize o maior risco geral:
-> **Principal alerta de OKR:** [indicador e squad] — [o que está acontecendo]
+### Bloco 2 — Análise individual por squad
 
----
-
-### BLOCO 2 — FLAGS DE CLIENTES + FCA
-
-**Visão geral:** X clientes total | Y Critical | Z Danger | W Care | V Safe | % Safe+Care: Z%
-
-Se mais de 40% estiverem em Critical ou Danger:
-> **ALERTA:** X% da carteira em Critical/Danger
-
-Liste todos os Critical e Danger, do mais grave para o menos grave. Para cada um, gere o FCA:
+Repita para cada squad (na ordem em que a usuária forneceu):
 
 ```
-**[NOME DO CLIENTE]** | [FLAG] | Score: [N] | Coordenador: [nome]
-- **Fato:** O que está acontecendo de forma objetiva (máx. 2 linhas)
-- **Causa:** Raiz do problema — ou "A investigar: [o que precisa descobrir]"
-- **Ação:**
-  1. [Ação] — responsável: [quem] | prazo: [quando]
-  2. [Ação] — responsável: [quem] | prazo: [quando]
-  3. [Ação] — responsável: [quem] | prazo: [quando]
+[Nome do Squad]
+
+Flag       Sem DD/MM    Sem DD/MM    Variação
+Safe       X            Y            ±N
+Critical   X            Y            ±N
+Care       X            Y            ±N
+Danger     X            Y            ±N
+
+Total      X            Y            = (ou ±N)
+
+Com base na comparação entre os dias [data anterior por extenso] e
+[data atual por extenso], identifiquei [N] clientes que tiveram alteração
+na sua Flag Calculada.
+
+- NOME DO CLIENTE EM CAIXA ALTA
+  - Mudança: De [Flag anterior] para [Flag atual].
+  - Motivos: [explicação analítica citando dimensões que mudaram, com valores
+    específicos. Se Observação do Health Score for relevante, incorpore.
+    Quando uma dimensão melhorou mas a flag piorou (ou vice-versa), explique
+    o trade-off.]
+
+(repetir por cliente, em ordem de severidade da mudança: pioras grandes
+primeiro — ex. Safe→Critical —, depois pioras menores, depois melhoras)
+
+Principal gargalo do [Squad]:
+- Dimensão crítica: [dimensão] — N de M clientes com falha na semana atual (X%).
+  Comparação semanal: na semana anterior eram K clientes (Y%) — [piorou / melhorou / permaneceu igual].
+- Cliente em alerta máximo: [NOME] — [flag anterior] → [flag atual].
+  Comparação semanal: [se mudou de flag, descreva o salto e a principal dimensão por trás;
+  se nenhum cliente piorou na semana, escreva "Nenhum cliente piorou — situação permaneceu
+  igual à semana anterior" e indique se a flag pior do squad continua sendo a mesma de antes].
 ```
 
-Use apenas os dados fornecidos. Se faltar informação para a Causa, escreva "A investigar: [o que precisa descobrir]". Ações devem ter responsável e prazo.
+## 4. Como calcular o "principal gargalo" (combinação a + b)
 
----
+### a) Dimensão crítica
+Na **semana atual**, conte para cada uma das 5 dimensões quantos clientes do squad estão "ruins":
+- Resultados ≤ 6 → conta como falha
+- Ops tráfego = FALSE → falha
+- Entregas prazo = FALSE → falha
+- Entregas qualidade = FALSE → falha
+- Relacionamento = FALSE → falha
 
-### BLOCO 3 — HEALTH SCORE DE PESSOAS
+A dimensão com a **maior taxa de falha** é o gargalo dimensional do squad. Em caso de empate, escolha a dimensão que mais piorou em relação à semana anterior. Se ainda houver empate, escolha na ordem: Resultados > Ops tráfego > Relacionamento > Entregas prazo > Entregas qualidade.
 
-**Visão geral por squad:**
+### b) Cliente em alerta máximo
+O cliente cuja flag mais piorou entre as duas semanas. Use a hierarquia numérica (Safe=1, Care=2, Danger=3, Critical=4):
+- Maior delta positivo = piora maior. Ex.: Safe→Critical (+3) é pior que Care→Danger (+1).
+- Em caso de empate, prefira:
+  1. Maior número de dimensões que pioraram
+  2. Maior queda absoluta em Resultados
+- Se **nenhum cliente piorou** na semana, escreva no campo Cliente em alerta máximo: "Nenhum cliente piorou — situação permaneceu igual à semana anterior" e indique qual cliente continua na pior flag do squad (se houver), pra manter monitoramento.
 
-```
-| Squad   | Total | Critical | Danger | Care | Safe | Média HS |
-|---------|-------|----------|--------|------|------|----------|
-| M.I.T   | 8     | 0        | 3      | 4    | 1    | 3,2      |
-| Arrows  | 10    | 1        | 4      | 4    | 1    | 3,0      |
-| Falcon  | 7     | 0        | 1      | 5    | 1    | 3,3      |
-```
+## 5. Regras
 
-**Atenção imediata — Critical e Danger:**
-
-Para cada pessoa em Critical ou Danger: nome, squad, função, flag, média HS, maturidade, e o principal sinal de alerta em 1 linha.
-
-Priorize:
-- Offboarding = "Atenção (sinal de risco)" — pessoa em risco de saída
-- Desempenho Técnico ≤ 2 em funções executoras (GT, Account Manager)
-- Visão e Antecipação ≤ 2 combinado com Desempenho Técnico ≤ 2
-- Potencial de Liderança = Sim com flag Danger/Critical — risco de perder talento
-- Observações com "sair", "proposta", "desvalorizado", "conflito"
-
-**Talentos a preservar:**
-
-Liste até 3 pessoas com Potencial de Liderança = Sim e flag Safe/Care.
-
-**Alerta de squad:**
-
-Se ≥ 50% das pessoas de um squad estiverem em Danger/Critical:
-> **ALERTA DE SQUAD:** [squad] — X% em risco. Verificar se há problema sistêmico.
-
----
-
-### RESUMO EXECUTIVO (opcional)
-
-Ao final dos 3 blocos, pergunte: "Quer um resumo executivo para abrir o QC?"
-
-Se sim, entregue 3–5 bullets com os principais alertas e oportunidades da semana — o que a gestora precisa saber antes de entrar na sala.
+- Use sempre os valores reais (TRUE/FALSE, nota 0–10). Não invente.
+- Não classifique flags por conta própria — a Flag Calculada vem pronta na base.
+- Não invente dimensões fora das 5 listadas.
+- Se a usuária forneceu dados de só 1 squad, gere mesmo assim a tabela comparativa geral (será igual à do squad).
+- Antes de entregar a saída final, confira que o total de clientes em "semana anterior" e "semana atual" bate com o total na tabela comparativa geral — se não bater, há cliente que entrou ou saiu da base; sinalize isso explicitamente no final.
+- Saída em português. Sem emojis.
